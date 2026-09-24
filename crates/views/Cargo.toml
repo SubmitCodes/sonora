@@ -15,3 +15,5 @@ router.workspace = true
 ui.workspace = true
 state.workspace = true
 log.workspace = true
+arabic_reshaper.workspace = true
+unicode-bidi.workspace = true

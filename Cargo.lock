@@ -284,6 +284,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arabic_reshaper"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb963411bc62b3888e69ad0d821ac03a3176ec7d74c2096bb5555a4cc419545b"
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8888,6 +8894,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "views"
 version = "0.38.0"
 dependencies = [
+ "arabic_reshaper",
  "gpui",
  "i18n",
  "icons",
@@ -8898,6 +8905,7 @@ dependencies = [
  "router",
  "state",
  "ui",
+ "unicode-bidi",
 ]
 
 [[package]]

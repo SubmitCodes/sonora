@@ -1245,6 +1245,13 @@ impl Aside {
                         (_, true) => mix(shade(true), tint, ramp(self.departed, window)),
                         _ => tint,
                     };
+                    let is_rtl = is_rtl_text(&line.text);
+                    let align_right = match (is_rtl, line.voice.lead()) {
+                        (false, true) => false,
+                        (false, false) => true,
+                        (true, true) => true,
+                        (true, false) => false,
+                    };
                     let sung = Sung {
                         karaoke_tint: mix(
                             theme.foreground,
@@ -1252,9 +1259,9 @@ impl Aside {
                             primary_karaoke_fade(line, active, position),
                         ),
                         lift,
-                        from: match line.voice.lead() {
-                            true => gpui::point(0., 0.5),
-                            false => gpui::point(1., 0.5),
+                        from: match align_right {
+                            false => gpui::point(0., 0.5),
+                            true => gpui::point(1., 0.5),
                         },
                         ..sung
                     };
@@ -1268,7 +1275,8 @@ impl Aside {
                             fixed_lyrics_lane(&plan.text, line.voice, sung).into_any_element()
                         }
                         _ => div()
-                            .child(SharedString::from(line.text.clone()))
+                            .when(align_right, |this| this.text_right())
+                            .child(SharedString::from(prepare_rtl_display(&line.text)))
                             .into_any_element(),
                     };
                     let fade = match (line.secondary.is_empty(), active, departing) {
@@ -1334,7 +1342,7 @@ impl Aside {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .when(!line.voice.lead(), |this| this.items_end().text_right())
+                        .when(align_right, |this| this.items_end().text_right())
                         .child(primary)
                         .when_some(
                             selected_romanization(&line.romanized, romanization_scripts),
@@ -1417,24 +1425,28 @@ impl Aside {
                 rendered
             }
             (None, LyricsState::Ready) => match &shown {
-                Some(music::Lyrics::Plain { text, romanized }) => vec![
-                    div()
-                        .w_full()
-                        .max_w(reach)
-                        .px_2()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .text_size(lane_size)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.muted_foreground)
-                        .child(SharedString::from(text.clone()))
-                        .when_some(
-                            selected_romanization(romanized, romanization_scripts),
-                            |this, text| this.child(romanized_lyrics_lane(text, lane_size, &theme)),
-                        )
-                        .into_any_element(),
-                ],
+                Some(music::Lyrics::Plain { text, romanized }) => {
+                    let is_rtl = is_rtl_text(text);
+                    vec![
+                        div()
+                            .w_full()
+                            .max_w(reach)
+                            .px_2()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .text_size(lane_size)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.muted_foreground)
+                            .when(is_rtl, |this| this.items_end().text_right())
+                            .child(SharedString::from(prepare_rtl_display(text)))
+                            .when_some(
+                                selected_romanization(romanized, romanization_scripts),
+                                |this, text| this.child(romanized_lyrics_lane(text, lane_size, &theme)),
+                            )
+                            .into_any_element(),
+                    ]
+                }
                 _ => vec![wordless("lyrics-missing", "icons/mic-off.svg")],
             },
             (None, LyricsState::Idle) => vec![empty("lyrics-idle", cx)],
@@ -1859,7 +1871,62 @@ fn source_link(name: SharedString, to: Destination, cx: &App) -> impl IntoElemen
         .child(name)
 }
 
+fn is_rtl_text(text: &str) -> bool {
+    text.chars().any(|ch| matches!(ch as u32,
+        0x0590..=0x05FF
+        | 0x0600..=0x06FF
+        | 0x0750..=0x077F
+        | 0x08A0..=0x08FF
+        | 0xFB50..=0xFDFF
+        | 0xFE70..=0xFEFF
+    ))
+}
+
+fn contains_arabic(text: &str) -> bool {
+    text.chars().any(|ch| matches!(ch as u32,
+        0x0600..=0x06FF
+        | 0x0750..=0x077F
+        | 0x08A0..=0x08FF
+        | 0xFB50..=0xFDFF
+        | 0xFE70..=0xFEFF
+    ))
+}
+
+fn prepare_rtl_display(text: &str) -> String {
+    if !is_rtl_text(text) {
+        return text.to_owned();
+    }
+    text.lines()
+        .map(|line| {
+            if !is_rtl_text(line) {
+                return line.to_owned();
+            }
+            let reshaped = if contains_arabic(line) {
+                arabic_reshaper::arabic_reshape(line)
+            } else {
+                line.to_owned()
+            };
+            let bidi_info = unicode_bidi::BidiInfo::new(&reshaped, Some(unicode_bidi::Level::rtl()));
+            let mut visual = String::with_capacity(reshaped.len());
+            for para in &bidi_info.paragraphs {
+                let range = para.range.clone();
+                let display = bidi_info.reorder_line(para, range);
+                visual.push_str(&display);
+            }
+            visual
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn fixed_lyrics_lane(rows: &[SharedString], voice: Voice, sung: Sung) -> Div {
+    let is_rtl = rows.iter().any(|r| is_rtl_text(r.as_ref()));
+    let align_right = match (is_rtl, voice.lead()) {
+        (false, true) => false,
+        (false, false) => true,
+        (true, true) => true,
+        (true, false) => false,
+    };
     div()
         .flex()
         .flex_col()
@@ -1867,7 +1934,7 @@ fn fixed_lyrics_lane(rows: &[SharedString], voice: Voice, sung: Sung) -> Div {
             lifted(
                 div()
                     .w_full()
-                    .when(!voice.lead(), |this| this.text_right())
+                    .when(align_right, |this| this.text_right())
                     .child(row.clone()),
                 sung,
             )
@@ -1879,7 +1946,7 @@ fn loose_plan(line: &str, words: &[music::LyricsWord]) -> Wrapped {
     let parts = karaoke_parts(line, words);
     let fragments = parts
         .iter()
-        .map(|(text, _)| SharedString::from(text.clone()))
+        .map(|(text, _)| SharedString::from(prepare_rtl_display(text)))
         .collect::<Vec<_>>();
     let spoken = parts.iter().map(|(_, word)| *word).collect::<Vec<_>>();
     Wrapped {
@@ -1902,6 +1969,14 @@ fn karaoke_lane(
     voice: Voice,
     sung: Sung,
 ) -> Div {
+    let is_rtl = plan.text.iter().any(|r| is_rtl_text(r.as_ref()))
+        || plan.fragments.iter().any(|f| is_rtl_text(f.as_ref()));
+    let align_right = match (is_rtl, voice.lead()) {
+        (false, true) => false,
+        (false, false) => true,
+        (true, true) => true,
+        (true, false) => false,
+    };
     let edge_fade = verse * REVEAL;
     let Wrapped {
         fragments,
@@ -1923,7 +1998,8 @@ fn karaoke_lane(
     let overlay = |text: SharedString, reveal: Reveal, tint: gpui::Hsla| {
         div()
             .absolute()
-            .left_0()
+            .when(!is_rtl, |this| this.left_0())
+            .when(is_rtl, |this| this.right_0())
             .top_0()
             .bottom_0()
             .map(|this| match reveal.width {
@@ -1933,9 +2009,18 @@ fn karaoke_lane(
             .overflow_hidden()
             .text_color(tint)
             .when(reveal.landing > 0., |this| {
-                this.fade_sides(px(0.), edge_fade * reveal.landing)
+                if is_rtl {
+                    this.fade_sides(edge_fade * reveal.landing, px(0.))
+                } else {
+                    this.fade_sides(px(0.), edge_fade * reveal.landing)
+                }
             })
-            .child(div().whitespace_nowrap().child(text))
+            .child(
+                div()
+                    .when(is_rtl, |this| this.absolute().right_0())
+                    .whitespace_nowrap()
+                    .child(text),
+            )
     };
     let lit = |text: SharedString, reveal: Reveal| {
         div()
@@ -1952,13 +2037,14 @@ fn karaoke_lane(
         false => div()
             .flex()
             .flex_col()
-            .text_left()
+            .when(!is_rtl, |this| this.text_left())
+            .when(is_rtl, |this| this.text_right())
             .children((0..plan.rows.len()).map(|row| {
                 let reveal = revealed(plan, row, &windows, position, edge_fade);
                 lifted(
                     div()
                         .flex()
-                        .when(!voice.lead(), |this| this.justify_end())
+                        .when(align_right, |this| this.justify_end())
                         .child(lit(plan.text[row].clone(), reveal)),
                     sung,
                 )
@@ -1966,8 +2052,9 @@ fn karaoke_lane(
         true => div()
             .flex()
             .flex_wrap()
-            .text_left()
-            .when(!voice.lead(), |this| this.justify_end())
+            .when(!is_rtl, |this| this.text_left())
+            .when(is_rtl, |this| this.text_right().flex_row_reverse())
+            .when(align_right, |this| this.justify_end())
             .children((0..fragments.len()).map(|index| {
                 let share = sweep(spoken.get(index).copied().unwrap_or(index));
                 let reveal = Reveal {
@@ -2076,6 +2163,13 @@ fn secondary_lyrics_lane(
     let tint = shade(line_active);
     let size = sung.lane;
     let karaoke_capable = sung.karaoke && lane.worded();
+    let is_rtl = is_rtl_text(&lane.text);
+    let align_right = match (is_rtl, voice.lead()) {
+        (false, true) => false,
+        (false, false) => true,
+        (true, true) => true,
+        (true, false) => false,
+    };
     let lyrics = div()
         .text_size(size)
         .map(|this| match (karaoke_capable, lane.words.as_ref()) {
@@ -2088,7 +2182,7 @@ fn secondary_lyrics_lane(
                 voice,
                 sung,
             )),
-            _ => this.child(SharedString::from(lane.text.clone())),
+            _ => this.child(SharedString::from(prepare_rtl_display(&lane.text))),
         });
     let held = shade(true);
     let lyrics = match dimming {
@@ -2102,7 +2196,7 @@ fn secondary_lyrics_lane(
     div()
         .flex()
         .flex_col()
-        .when(!voice.lead(), |this| this.items_end().text_right())
+        .when(align_right, |this| this.items_end().text_right())
         .child(lyrics)
         .when_some(
             selected_romanization(&lane.romanized, sung.scripts),
@@ -2361,13 +2455,14 @@ fn lyrics_wrap_rows(
     let text = rows
         .iter()
         .map(|row| {
-            SharedString::from(parts[row.clone()].iter().fold(
+            let row_text = parts[row.clone()].iter().fold(
                 String::new(),
                 |mut whole, (piece, _)| {
                     whole.push_str(piece);
                     whole
                 },
-            ))
+            );
+            SharedString::from(prepare_rtl_display(&row_text))
         })
         .collect::<Vec<_>>();
 
