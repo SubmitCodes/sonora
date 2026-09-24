@@ -1276,7 +1276,7 @@ impl Aside {
                         }
                         _ => div()
                             .when(align_right, |this| this.text_right())
-                            .child(SharedString::from(prepare_rtl_display(&line.text)))
+                            .child(SharedString::from(line.text.clone()))
                             .into_any_element(),
                     };
                     let fade = match (line.secondary.is_empty(), active, departing) {
@@ -1439,7 +1439,7 @@ impl Aside {
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme.muted_foreground)
                             .when(is_rtl, |this| this.items_end().text_right())
-                            .child(SharedString::from(prepare_rtl_display(text)))
+                            .child(SharedString::from(text.to_owned()))
                             .when_some(
                                 selected_romanization(romanized, romanization_scripts),
                                 |this, text| this.child(romanized_lyrics_lane(text, lane_size, &theme)),
@@ -1882,43 +1882,6 @@ fn is_rtl_text(text: &str) -> bool {
     ))
 }
 
-fn contains_arabic(text: &str) -> bool {
-    text.chars().any(|ch| matches!(ch as u32,
-        0x0600..=0x06FF
-        | 0x0750..=0x077F
-        | 0x08A0..=0x08FF
-        | 0xFB50..=0xFDFF
-        | 0xFE70..=0xFEFF
-    ))
-}
-
-fn prepare_rtl_display(text: &str) -> String {
-    if !is_rtl_text(text) {
-        return text.to_owned();
-    }
-    text.lines()
-        .map(|line| {
-            if !is_rtl_text(line) {
-                return line.to_owned();
-            }
-            let reshaped = if contains_arabic(line) {
-                arabic_reshaper::arabic_reshape(line)
-            } else {
-                line.to_owned()
-            };
-            let bidi_info = unicode_bidi::BidiInfo::new(&reshaped, Some(unicode_bidi::Level::rtl()));
-            let mut visual = String::with_capacity(reshaped.len());
-            for para in &bidi_info.paragraphs {
-                let range = para.range.clone();
-                let display = bidi_info.reorder_line(para, range);
-                visual.push_str(&display);
-            }
-            visual
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn fixed_lyrics_lane(rows: &[SharedString], voice: Voice, sung: Sung) -> Div {
     let is_rtl = rows.iter().any(|r| is_rtl_text(r.as_ref()));
     let align_right = match (is_rtl, voice.lead()) {
@@ -1946,7 +1909,7 @@ fn loose_plan(line: &str, words: &[music::LyricsWord]) -> Wrapped {
     let parts = karaoke_parts(line, words);
     let fragments = parts
         .iter()
-        .map(|(text, _)| SharedString::from(prepare_rtl_display(text)))
+        .map(|(text, _)| SharedString::from(text.to_owned()))
         .collect::<Vec<_>>();
     let spoken = parts.iter().map(|(_, word)| *word).collect::<Vec<_>>();
     Wrapped {
@@ -2182,7 +2145,7 @@ fn secondary_lyrics_lane(
                 voice,
                 sung,
             )),
-            _ => this.child(SharedString::from(prepare_rtl_display(&lane.text))),
+            _ => this.child(SharedString::from(lane.text.clone())),
         });
     let held = shade(true);
     let lyrics = match dimming {
@@ -2462,7 +2425,7 @@ fn lyrics_wrap_rows(
                     whole
                 },
             );
-            SharedString::from(prepare_rtl_display(&row_text))
+            SharedString::from(row_text)
         })
         .collect::<Vec<_>>();
 

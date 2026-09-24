@@ -23,8 +23,6 @@ webview = { path = "crates/webview" }
 widevine = { path = "crates/widevine" }
 
 anyhow = "1.0"
-arabic_reshaper = "0.4"
-unicode-bidi = "0.3"
 async-trait = "0.1"
 base64 = "0.22"
 blowfish = "0.9"
@@ -191,3 +189,8 @@ opt-level = 2
 [profile.dev.package."*"]
 debug = false
 opt-level = 2
+
+[patch."https://github.com/sonorahq/gpui"]
+gpui = { path = "../gpui/crates/gpui" }
+gpui_platform = { path = "../gpui/crates/gpui_platform" }
+
